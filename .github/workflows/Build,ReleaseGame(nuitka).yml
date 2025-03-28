@@ -1,7 +1,16 @@
-# pyinstaller version, much faster but more laggy to the game
-# pls use the nuutka version if you have time to wait
-# pyinstaller will pack the game in python with all the independent files 
-name: Build and Release Game (pyinstaller)
+# This workflow will build a game using Nuitka and release it as a GitHub release
+# the windows version needed to run around 50 min
+# the macOS version needed to run around 20 min
+# pls be patient to wait
+# i have spended a lot of time to make this workflow
+# if you have any question, pls contact me
+# the macOS version is for eric to test the game as he getting trobble to run the game on his mac
+# the windows version is for the most of the people to run the game
+# i am not sure if we will upload all these 3 type of version when we submit our work
+# this is better than pyinstaller as it will pack the python script in C code and compile it to a executable file
+# the game will run faster and the file size will be smaller
+
+name: Build and Release Game (nuitka)
 
 on:
   workflow_dispatch:
@@ -25,19 +34,22 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pygame
-        pip install pyinstaller
+        pip install nuitka
+        pip install ordered-set
+        pip install zstandard
         pip install -r requirements.txt
 
     - name: Build executable for Windows
       working-directory: ${{ github.workspace }}
       run: |
-        pyinstaller --onefile --windowed --name PropertyTycoon --icon "${{ github.workspace }}/assets/image/icon.ico" --add-data "${{ github.workspace }}/assets;assets" Main.py
+        python -m nuitka --standalone --onefile --assume-yes-for-downloads --windows-icon-from-ico="${{ github.workspace }}/assets/image/icon.ico" --include-data-dir="${{ github.workspace }}/assets=assets" --output-dir=dist --windows-console-mode=disable Main.py
+        mv dist/main.exe dist/PropertyTycoon-Windows.exe
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: PropertyTycoon-Windows
-        path: dist/PropertyTycoon.exe
+        path: dist/PropertyTycoon-Windows.exe
         retention-days: 90
 
   build-macos:
@@ -55,27 +67,29 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pygame
-        pip install pyinstaller
+        pip install nuitka
+        pip install ordered-set
+        pip install zstandard
         pip install pillow
         pip install -r requirements.txt
-        brew install create-dmg
+        brew install ccache
 
     - name: Create icon script
       run: |
         echo '
         from PIL import Image
         import os
-
+        
         os.makedirs("icon.iconset", exist_ok=True)
-
+        
         img = Image.open("assets/image/icon.ico")
-
+        
         sizes = [16, 32, 64, 128, 256, 512]
         for size in sizes:
             img_resized = img.resize((size, size))
             img_resized.save(f"icon.iconset/icon_{size}x{size}.png")
             img_resized.save(f"icon.iconset/icon_{size}x{size}@2x.png")
-
+        
         os.system("iconutil -c icns icon.iconset")
         ' > create_icns.py
         python create_icns.py
@@ -83,16 +97,15 @@ jobs:
     - name: Build macOS app
       working-directory: ${{ github.workspace }}
       run: |
-        if [ -f "icon.icns" ]; then
-          pyinstaller --windowed --name PropertyTycoon --icon icon.icns --add-data "${{ github.workspace }}/assets:assets" --osx-bundle-identifier com.example.propertytycoon Main.py
-        else
-          pyinstaller --windowed --name PropertyTycoon --add-data "${{ github.workspace }}/assets:assets" --osx-bundle-identifier com.example.propertytycoon Main.py
-        fi
-
-        chmod -R +x dist/PropertyTycoon.app
-
+        python -m nuitka --standalone --macos-create-app-bundle --macos-app-icon=icon.icns --assume-yes-for-downloads --include-data-dir="${{ github.workspace }}/assets=assets" --output-dir=dist Main.py
+        
+        # Rename the app bundle
+        mv dist/main.app dist/PropertyTycoon.app
+        
+        # Create a DMG file
         hdiutil create -volname "PropertyTycoon" -srcfolder dist/PropertyTycoon.app -ov -format UDZO dist/PropertyTycoon-macOS.dmg
-
+        
+        # Also create a zip as backup
         cd dist
         zip -r PropertyTycoon-macOS.zip PropertyTycoon.app
         cd ..
@@ -146,7 +159,9 @@ jobs:
             dpkg-dev \
             imagemagick \
             python3-pil \
-            python3-pil.imagetk
+            python3-pil.imagetk \
+            ccache \
+            build-essential
         run: |
           export DEBIAN_FRONTEND=noninteractive
           
@@ -154,10 +169,11 @@ jobs:
           source venv/bin/activate
           pip install --upgrade pip
           pip install wheel
-          pip install pygame pyinstaller pillow
+          pip install pygame nuitka ordered-set zstandard pillow
           pip install -r requirements.txt
 
-          pyinstaller --onefile --name PropertyTycoon --add-data "assets:assets" Main.py
+          python3 -m nuitka --standalone --onefile --assume-yes-for-downloads --include-data-dir="assets=assets" --output-dir=dist Main.py
+          mv dist/main.bin dist/PropertyTycoon
 
           PKG_NAME="propertytycoon"
           PKG_VERSION="${{ steps.get_version_deb.outputs.version }}"
@@ -188,7 +204,7 @@ jobs:
           Maintainer: Your Name <your.email@example.com>
           Depends: python3, libsdl2-2.0-0, libsdl2-image-2.0-0, libsdl2-mixer-2.0-0, libsdl2-ttf-2.0-0
           Description: Property Tycoon Game
-           A fun property trading game. Built for Linux ARM64.
+          Property Tycoon deb version Built for Linux ARM64.
           EOF
 
           cat << EOF > "${APP_DIR}/${PKG_NAME}.desktop"
@@ -202,7 +218,6 @@ jobs:
           Categories=Game;BoardGame;
           EOF
 
-          # Create a simple placeholder icon directly with Python script
           echo "Creating icon for application..."
           cat > create_icon.py << 'EOF'
           from PIL import Image, ImageDraw, ImageFont
@@ -213,28 +228,22 @@ jobs:
           icon_name = sys.argv[2]
           icon_size = int(sys.argv[3])
 
-          # Create directory if it doesn't exist
           if not os.path.exists(icon_dir):
               os.makedirs(icon_dir, exist_ok=True)
 
-          # Create a simple colored square as placeholder
           img = Image.new('RGB', (icon_size, icon_size), color=(0, 120, 212))
           draw = ImageDraw.Draw(img)
 
-          # Add text to the image
           text_pos = (icon_size//2-20, icon_size//2-10)
           draw.text(text_pos, "PT", fill=(255, 255, 255), font=None)
 
-          # Save the image
           output_path = os.path.join(icon_dir, icon_name)
           img.save(output_path)
           print(f"Icon created at {output_path}")
           EOF
 
-          # Run the Python script to create the icon
           python3 create_icon.py "${ICON_DIR}" "${ICON_PNG}" "${ICON_SIZE}"
           
-          # Make sure the icon has the correct permissions
           if [ -f "${ICON_DIR}/${ICON_PNG}" ]; then
             chmod 644 "${ICON_DIR}/${ICON_PNG}"
             echo "Icon file created successfully at ${ICON_DIR}/${ICON_PNG}"
@@ -261,7 +270,7 @@ jobs:
     needs: [build-windows, build-macos, build-linux-arm64]
     runs-on: ubuntu-latest
     steps:
-    - name: Generate version number for Release Tag
+    - name: Generate version number
       id: get_version
       shell: bash
       run: |
@@ -280,7 +289,7 @@ jobs:
       with:
         name: PropertyTycoon-macOS-dmg
         path: dist-macos-dmg
-
+        
     - name: Download macOS ZIP artifact
       uses: actions/download-artifact@v4
       with:
@@ -299,10 +308,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: |
-          dist-windows/PropertyTycoon.exe
+          dist-windows/PropertyTycoon-Windows.exe
           dist-macos-dmg/PropertyTycoon-macOS.dmg
           dist-macos-zip/PropertyTycoon-macOS.zip
-          dist-linux-arm64/*.deb
+          dist-linux-arm64.deb
         name: Build-${{ steps.get_version.outputs.version }}
         tag_name: Build-${{ steps.get_version.outputs.version }}
         draft: false

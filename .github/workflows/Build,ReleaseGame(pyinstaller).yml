@@ -1,0 +1,303 @@
+# pyinstaller version, much faster but more laggy to the game
+# pls use the nuutka version if you have time to wait
+# pyinstaller will pack the game in python with all the independent files 
+name: Build and Release Game (pyinstaller)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+        architecture: 'x64'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pygame
+        pip install pyinstaller
+        pip install -r requirements.txt
+
+    - name: Build executable for Windows
+      working-directory: ${{ github.workspace }}
+      run: |
+        pyinstaller --onefile --windowed --name PropertyTycoon --icon "${{ github.workspace }}/assets/image/icon.ico" --add-data "${{ github.workspace }}/assets;assets" Main.py
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-Windows
+        path: dist/PropertyTycoon.exe
+        retention-days: 90
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+        architecture: 'x64'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pygame
+        pip install pyinstaller
+        pip install pillow
+        pip install -r requirements.txt
+        brew install create-dmg
+
+    - name: Create icon script
+      run: |
+        echo '
+        from PIL import Image
+        import os
+
+        os.makedirs("icon.iconset", exist_ok=True)
+
+        img = Image.open("assets/image/icon.ico")
+
+        sizes = [16, 32, 64, 128, 256, 512]
+        for size in sizes:
+            img_resized = img.resize((size, size))
+            img_resized.save(f"icon.iconset/icon_{size}x{size}.png")
+            img_resized.save(f"icon.iconset/icon_{size}x{size}@2x.png")
+
+        os.system("iconutil -c icns icon.iconset")
+        ' > create_icns.py
+        python create_icns.py
+
+    - name: Build macOS app
+      working-directory: ${{ github.workspace }}
+      run: |
+        if [ -f "icon.icns" ]; then
+          pyinstaller --windowed --name PropertyTycoon --icon icon.icns --add-data "${{ github.workspace }}/assets:assets" --osx-bundle-identifier com.example.propertytycoon Main.py
+        else
+          pyinstaller --windowed --name PropertyTycoon --add-data "${{ github.workspace }}/assets:assets" --osx-bundle-identifier com.example.propertytycoon Main.py
+        fi
+
+        chmod -R +x dist/PropertyTycoon.app
+
+        hdiutil create -volname "PropertyTycoon" -srcfolder dist/PropertyTycoon.app -ov -format UDZO dist/PropertyTycoon-macOS.dmg
+
+        cd dist
+        zip -r PropertyTycoon-macOS.zip PropertyTycoon.app
+        cd ..
+
+    - name: Upload app bundle artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-app
+        path: dist/PropertyTycoon.app
+        retention-days: 90
+
+    - name: Upload DMG artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-dmg
+        path: dist/PropertyTycoon-macOS.dmg
+        retention-days: 90
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-zip
+        path: dist/PropertyTycoon-macOS.zip
+        retention-days: 90
+
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Generate version number for package
+      id: get_version_deb
+      shell: bash
+      run: |
+        VERSION=$(date +'%Y.%m.%d.%H%M%S')
+        echo "version=${VERSION}" >> $GITHUB_ENV
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Build ARM64 .deb package using QEMU
+      uses: uraimo/run-on-arch-action@v3
+      with:
+        arch: aarch64
+        distro: ubuntu22.04
+        install: |
+          apt-get update -q -y
+          apt-get install -q -y \
+            python3 python3-pip python3-venv \
+            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            patchelf \
+            fakeroot \
+            dpkg-dev \
+            imagemagick \
+            python3-pil \
+            python3-pil.imagetk
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install wheel
+          pip install pygame pyinstaller pillow
+          pip install -r requirements.txt
+
+          pyinstaller --onefile --name PropertyTycoon --add-data "assets:assets" Main.py
+
+          PKG_NAME="propertytycoon"
+          PKG_VERSION="${{ steps.get_version_deb.outputs.version }}"
+          PKG_ARCH="arm64"
+          DEB_DIR="debian_pkg"
+          INSTALL_DIR="${DEB_DIR}/usr/local/bin"
+          ASSETS_INSTALL_DIR="${DEB_DIR}/usr/share/${PKG_NAME}/assets"
+          APP_DIR="${DEB_DIR}/usr/share/applications"
+          ICON_SIZE="256"
+          ICON_DIR="${DEB_DIR}/usr/share/icons/hicolor/${ICON_SIZE}x${ICON_SIZE}/apps"
+          ICON_SOURCE="assets/image/icon.ico"
+          ICON_PNG="${PKG_NAME}.png"
+
+          echo "Creating package structure for ${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.deb"
+
+          mkdir -p "${DEB_DIR}/DEBIAN"
+          mkdir -p "${INSTALL_DIR}"
+          mkdir -p "${APP_DIR}"
+          mkdir -p "${ICON_DIR}"
+
+          cp dist/PropertyTycoon "${INSTALL_DIR}/"
+          chmod +x "${INSTALL_DIR}/PropertyTycoon"
+
+          cat << EOF > "${DEB_DIR}/DEBIAN/control"
+          Package: ${PKG_NAME}
+          Version: ${PKG_VERSION}
+          Architecture: ${PKG_ARCH}
+          Maintainer: Your Name <your.email@example.com>
+          Depends: python3, libsdl2-2.0-0, libsdl2-image-2.0-0, libsdl2-mixer-2.0-0, libsdl2-ttf-2.0-0
+          Description: Property Tycoon Game
+          Property Tycoon deb version Built for Linux ARM64.
+          EOF
+
+          cat << EOF > "${APP_DIR}/${PKG_NAME}.desktop"
+          [Desktop Entry]
+          Name=Property Tycoon
+          Comment=Property Trading Game
+          Exec=/usr/local/bin/PropertyTycoon
+          Icon=${PKG_NAME}
+          Terminal=false
+          Type=Application
+          Categories=Game;BoardGame;
+          EOF
+
+          echo "Creating icon for application..."
+          cat > create_icon.py << 'EOF'
+          from PIL import Image, ImageDraw, ImageFont
+          import os
+          import sys
+
+          icon_dir = sys.argv[1]
+          icon_name = sys.argv[2]
+          icon_size = int(sys.argv[3])
+
+          if not os.path.exists(icon_dir):
+              os.makedirs(icon_dir, exist_ok=True)
+
+          img = Image.new('RGB', (icon_size, icon_size), color=(0, 120, 212))
+          draw = ImageDraw.Draw(img)
+
+          text_pos = (icon_size//2-20, icon_size//2-10)
+          draw.text(text_pos, "PT", fill=(255, 255, 255), font=None)
+
+          output_path = os.path.join(icon_dir, icon_name)
+          img.save(output_path)
+          print(f"Icon created at {output_path}")
+          EOF
+
+          python3 create_icon.py "${ICON_DIR}" "${ICON_PNG}" "${ICON_SIZE}"
+          
+          if [ -f "${ICON_DIR}/${ICON_PNG}" ]; then
+            chmod 644 "${ICON_DIR}/${ICON_PNG}"
+            echo "Icon file created successfully at ${ICON_DIR}/${ICON_PNG}"
+          else
+            echo "WARNING: Failed to create icon file. Creating empty file as fallback."
+            touch "${ICON_DIR}/${ICON_PNG}"
+            chmod 644 "${ICON_DIR}/${ICON_PNG}"
+          fi
+
+          echo "Building .deb package..."
+          fakeroot dpkg-deb --build "${DEB_DIR}" "${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.deb"
+
+          echo "Package built: ${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.deb"
+          ls -l *.deb
+
+    - name: Upload Linux ARM64 .deb artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-linux-arm64-deb
+        path: "*.deb"
+        retention-days: 90
+
+  release:
+    needs: [build-windows, build-macos, build-linux-arm64]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate version number for Release Tag
+      id: get_version
+      shell: bash
+      run: |
+        VERSION=$(date +'%d.%m.20%y-%H%M%S')
+        echo "version=${VERSION}" >> $GITHUB_ENV
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Download Windows artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: PropertyTycoon-Windows
+        path: dist-windows
+
+    - name: Download macOS DMG artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-dmg
+        path: dist-macos-dmg
+
+    - name: Download macOS ZIP artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-zip
+        path: dist-macos-zip
+
+    - name: Download Linux ARM64 artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: PropertyTycoon-linux-arm64-deb
+        path: dist-linux-arm64
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        files: |
+          dist-windows/PropertyTycoon-Windows.exe
+          dist-macos-dmg/PropertyTycoon-macOS.dmg
+          dist-macos-zip/PropertyTycoon-macOS.zip
+          dist-linux-arm64.deb
+        name: Build-${{ steps.get_version.outputs.version }}
+        tag_name: Build-${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: false
+        fail_on_unmatched_files: false
