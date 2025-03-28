@@ -134,7 +134,7 @@ jobs:
     - name: Build ARM64 .deb package using QEMU
       uses: uraimo/run-on-arch-action@v3
       with:
-        arch: arm64
+        arch: aarch64
         distro: ubuntu22.04
         githubToken: ${{ secrets.GITHUB_TOKEN }}
         install: |
