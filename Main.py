@@ -41,13 +41,22 @@ class LogRedirector:
         self.logger = logger
         self.level = level
         self.buffer = ""
-
+        self._writing = False
+    
     def write(self, buf):
-        for line in buf.rstrip().splitlines():
-            if line.strip():
-                self.logger.log(self.level, line.rstrip())
-        sys.__stdout__.write(buf)
-
+        if self._writing:
+            sys.__stdout__.write(buf)
+            return
+            
+        self._writing = True
+        try:
+            for line in buf.rstrip().splitlines():
+                if line.strip():
+                    self.logger.log(self.level, line.rstrip())
+            sys.__stdout__.write(buf)
+        finally:
+            self._writing = False
+    
     def flush(self):
         pass
 
