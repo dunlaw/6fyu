@@ -132,7 +132,7 @@ jobs:
         echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
     - name: Build ARM64 .deb package using QEMU
-      uses: uraimo/run-on-arch-action@v2.7.0
+      uses: uraimo/run-on-arch-action@v3
       with:
         arch: arm64
         distro: ubuntu22.04
