@@ -1,0 +1,177 @@
+# This workflow will build a game using Nuitka and release it as a GitHub release
+# the windows version needed to run around 50 min
+# the macOS version needed to run around 20 min
+# pls be patient to wait
+# i have spended a lot of time to make this workflow
+# if you have any question, pls contact me
+# the macOS version is for eric to test the game as he getting trobble to run the game on his mac
+# the windows version is for the most of the people to run the game
+# i am not sure if we will upload all these 3 type of version when we submit our work
+# this is better than pyinstaller as it will pack the python script in C code and compile it to a executable file
+# the game will run faster and the file size will be smaller
+
+name: Build and Release Game (nuitka)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+        architecture: 'x64'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pygame
+        pip install nuitka
+        pip install ordered-set
+        pip install zstandard
+        pip install -r requirements.txt
+
+    - name: Build executable for Windows
+      working-directory: ${{ github.workspace }}
+      run: |
+        python -m nuitka --standalone --onefile --assume-yes-for-downloads --windows-icon-from-ico="${{ github.workspace }}/assets/image/icon.ico" --include-data-dir="${{ github.workspace }}/assets=assets" --output-dir=dist --windows-console-mode=disable main.py
+        mv dist/main.exe dist/PropertyTycoon-Windows.exe
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-Windows
+        path: dist/PropertyTycoon-Windows.exe
+        retention-days: 90
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+        architecture: 'x64'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pygame
+        pip install nuitka
+        pip install ordered-set
+        pip install zstandard
+        pip install pillow
+        pip install -r requirements.txt
+        brew install ccache
+
+    - name: Create icon script
+      run: |
+        echo '
+        from PIL import Image
+        import os
+        
+        os.makedirs("icon.iconset", exist_ok=True)
+        
+        img = Image.open("assets/image/icon.ico")
+        
+        sizes = [16, 32, 64, 128, 256, 512]
+        for size in sizes:
+            img_resized = img.resize((size, size))
+            img_resized.save(f"icon.iconset/icon_{size}x{size}.png")
+            img_resized.save(f"icon.iconset/icon_{size}x{size}@2x.png")
+        
+        os.system("iconutil -c icns icon.iconset")
+        ' > create_icns.py
+        python create_icns.py
+
+    - name: Build macOS app
+      working-directory: ${{ github.workspace }}
+      run: |
+        python -m nuitka --standalone --macos-create-app-bundle --macos-app-icon=icon.icns --assume-yes-for-downloads --include-data-dir="${{ github.workspace }}/assets=assets" --output-dir=dist main.py
+        
+        # Rename the app bundle
+        mv dist/main.app dist/PropertyTycoon.app
+        
+        # Create a DMG file
+        hdiutil create -volname "PropertyTycoon" -srcfolder dist/PropertyTycoon.app -ov -format UDZO dist/PropertyTycoon-macOS.dmg
+        
+        # Also create a zip as backup
+        cd dist
+        zip -r PropertyTycoon-macOS.zip PropertyTycoon.app
+        cd ..
+
+    - name: Upload app bundle artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-app
+        path: dist/PropertyTycoon.app
+        retention-days: 90
+
+    - name: Upload DMG artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-dmg
+        path: dist/PropertyTycoon-macOS.dmg
+        retention-days: 90
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-zip
+        path: dist/PropertyTycoon-macOS.zip
+        retention-days: 90
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate version number
+      id: get_version
+      shell: bash
+      run: |
+        VERSION=$(date +'%d.%m.20%y-%H%M%S')
+        echo "version=${VERSION}" >> $GITHUB_ENV
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Download Windows artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: PropertyTycoon-Windows
+        path: dist-windows
+
+    - name: Download macOS DMG artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-dmg
+        path: dist-macos-dmg
+        
+    - name: Download macOS ZIP artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: PropertyTycoon-macOS-zip
+        path: dist-macos-zip
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        files: |
+          dist-windows/PropertyTycoon-Windows.exe
+          dist-macos-dmg/PropertyTycoon-macOS.dmg
+          dist-macos-zip/PropertyTycoon-macOS.zip
+        name: Build-${{ steps.get_version.outputs.version }}
+        tag_name: Build-${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: false
+        fail_on_unmatched_files: false
