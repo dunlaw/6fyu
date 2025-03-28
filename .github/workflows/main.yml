@@ -31,7 +31,7 @@ jobs:
     - name: Build executable for Windows
       working-directory: ${{ github.workspace }}
       run: |
-        pyinstaller --onefile --windowed --name PropertyTycoon --icon "${{ github.workspace }}/assets/image/icon.ico" --add-data "${{ github.workspace }}/assets;assets" main.py
+        pyinstaller --onefile --windowed --name PropertyTycoon --icon "${{ github.workspace }}/assets/image/icon.ico" --add-data "${{ github.workspace }}/assets;assets" Main.py
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
@@ -84,9 +84,9 @@ jobs:
       working-directory: ${{ github.workspace }}
       run: |
         if [ -f "icon.icns" ]; then
-          pyinstaller --windowed --name PropertyTycoon --icon icon.icns --add-data "${{ github.workspace }}/assets:assets" --osx-bundle-identifier com.example.propertytycoon main.py
+          pyinstaller --windowed --name PropertyTycoon --icon icon.icns --add-data "${{ github.workspace }}/assets:assets" --osx-bundle-identifier com.example.propertytycoon Main.py
         else
-          pyinstaller --windowed --name PropertyTycoon --add-data "${{ github.workspace }}/assets:assets" --osx-bundle-identifier com.example.propertytycoon main.py
+          pyinstaller --windowed --name PropertyTycoon --add-data "${{ github.workspace }}/assets:assets" --osx-bundle-identifier com.example.propertytycoon Main.py
         fi
 
         chmod -R +x dist/PropertyTycoon.app
