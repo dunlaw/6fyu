@@ -136,7 +136,6 @@ jobs:
       with:
         arch: aarch64
         distro: ubuntu22.04
-        githubToken: ${{ secrets.GITHUB_TOKEN }}
         install: |
           apt-get update -q -y
           apt-get install -q -y \
@@ -148,12 +147,24 @@ jobs:
             imagemagick
         run: |
           export DEBIAN_FRONTEND=noninteractive
+          
+          # Debug: Show current directory and list files
+          pwd
+          ls -la
+          
           python3 -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
           pip install wheel
           pip install pygame pyinstaller
           pip install -r requirements.txt
+
+          # Make sure main.py exists before running PyInstaller
+          if [ ! -f "main.py" ]; then
+            echo "Error: main.py not found in current directory"
+            find . -name "main.py" -type f
+            exit 1
+          fi
 
           pyinstaller --onefile --name PropertyTycoon --add-data "assets:assets" main.py
 
