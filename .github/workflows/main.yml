@@ -144,7 +144,9 @@ jobs:
             patchelf \
             fakeroot \
             dpkg-dev \
-            imagemagick
+            imagemagick \
+            python3-pil \
+            python3-pil.imagetk
         run: |
           export DEBIAN_FRONTEND=noninteractive
           
@@ -152,7 +154,7 @@ jobs:
           source venv/bin/activate
           pip install --upgrade pip
           pip install wheel
-          pip install pygame pyinstaller
+          pip install pygame pyinstaller pillow
           pip install -r requirements.txt
 
           pyinstaller --onefile --name PropertyTycoon --add-data "assets:assets" Main.py
@@ -200,12 +202,46 @@ jobs:
           Categories=Game;BoardGame;
           EOF
 
-          if [ -f "${ICON_SOURCE}" ]; then
-            echo "Converting ${ICON_SOURCE} to ${ICON_DIR}/${ICON_PNG}"
-            convert "${ICON_SOURCE}" -resize ${ICON_SIZE}x${ICON_SIZE} "${ICON_DIR}/${ICON_PNG}"
+          # Create a simple placeholder icon directly with Python script
+          echo "Creating icon for application..."
+          cat > create_icon.py << 'EOF'
+          from PIL import Image, ImageDraw, ImageFont
+          import os
+          import sys
+
+          icon_dir = sys.argv[1]
+          icon_name = sys.argv[2]
+          icon_size = int(sys.argv[3])
+
+          # Create directory if it doesn't exist
+          if not os.path.exists(icon_dir):
+              os.makedirs(icon_dir, exist_ok=True)
+
+          # Create a simple colored square as placeholder
+          img = Image.new('RGB', (icon_size, icon_size), color=(0, 120, 212))
+          draw = ImageDraw.Draw(img)
+
+          # Add text to the image
+          text_pos = (icon_size//2-20, icon_size//2-10)
+          draw.text(text_pos, "PT", fill=(255, 255, 255), font=None)
+
+          # Save the image
+          output_path = os.path.join(icon_dir, icon_name)
+          img.save(output_path)
+          print(f"Icon created at {output_path}")
+          EOF
+
+          # Run the Python script to create the icon
+          python3 create_icon.py "${ICON_DIR}" "${ICON_PNG}" "${ICON_SIZE}"
+          
+          # Make sure the icon has the correct permissions
+          if [ -f "${ICON_DIR}/${ICON_PNG}" ]; then
             chmod 644 "${ICON_DIR}/${ICON_PNG}"
+            echo "Icon file created successfully at ${ICON_DIR}/${ICON_PNG}"
           else
-            echo "Warning: Icon file ${ICON_SOURCE} not found. Skipping icon installation."
+            echo "WARNING: Failed to create icon file. Creating empty file as fallback."
+            touch "${ICON_DIR}/${ICON_PNG}"
+            chmod 644 "${ICON_DIR}/${ICON_PNG}"
           fi
 
           echo "Building .deb package..."
